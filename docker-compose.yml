@@ -1,0 +1,86 @@
+version: '3.8'
+
+services:
+  # MySQL Database
+  atm-db:
+    image: mysql:8.0
+    container_name: atm-db
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: rootpassword
+      MYSQL_DATABASE: atm_simulator
+      MYSQL_USER: atm_user
+      MYSQL_PASSWORD: atm_password
+    ports:
+      - "3307:3306"
+    volumes:
+      - mysql_data:/var/lib/mysql
+      - ./backend/src/config/schema.sql:/docker-entrypoint-initdb.d/01-schema.sql
+      - ./backend/src/config/seed.sql:/docker-entrypoint-initdb.d/02-seed.sql
+    networks:
+      - atm-network
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
+      timeout: 20s
+      retries: 10
+
+  # Backend API
+  atm-backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: atm-backend
+    restart: unless-stopped
+    environment:
+      NODE_ENV: production
+      PORT: 4000
+      DB_HOST: atm-db
+      DB_PORT: 3306
+      DB_NAME: atm_simulator
+      DB_USER: atm_user
+      DB_PASSWORD: atm_password
+      JWT_SECRET: your-super-secret-jwt-key-change-in-production
+      REFRESH_SECRET: your-super-secret-refresh-key-change-in-production
+      JWT_EXPIRES_IN: 90s
+      REFRESH_EXPIRES_IN: 7d
+    ports:
+      - "4000:4000"
+    volumes:
+      - ./backend/logs:/app/logs
+      - ./backend/receipts:/app/receipts
+    depends_on:
+      atm-db:
+        condition: service_healthy
+    networks:
+      - atm-network
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:4000/health"]
+      timeout: 10s
+      retries: 5
+
+  # Frontend React App
+  atm-frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: atm-frontend
+    restart: unless-stopped
+    ports:
+      - "3000:80"
+    depends_on:
+      atm-backend:
+        condition: service_healthy
+    networks:
+      - atm-network
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:80/health"]
+      timeout: 10s
+      retries: 5
+
+volumes:
+  mysql_data:
+    driver: local
+
+networks:
+  atm-network:
+    driver: bridge
